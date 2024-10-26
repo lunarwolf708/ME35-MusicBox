@@ -1,0 +1,91 @@
+import time
+import uasyncio as asyncio  # Use uasyncio for MicroPython
+from BLE_CEEO import Yell
+from machine import ADC, Pin
+
+# MIDI Commands
+NoteOn = 0x90
+NoteOff = 0x80
+SetInstrument = 0xC0
+Reset = 0xFF
+
+# Velocity settings
+velocity = {'off': 0, 'pppp': 8, 'ppp': 20, 'pp': 31, 'p': 42, 'mp': 53,
+            'mf': 64, 'f': 80, 'ff': 96, 'fff': 112, 'ffff': 127}
+
+# Light sensor setup
+ldr_pin = ADC(Pin(28))
+COVERED_THRESHOLD = 1.0  # Voltage below this means sensor is covered
+
+# Connect to BLE MIDI device (change the name here)
+p = Yell('SNOOPY', verbose=True, type='midi')
+p.connect_up()
+
+# Define channel
+channel = 0x0F & 0  # MIDI channel 0
+cmd = NoteOn
+
+# Example measures: replace these notes with the ones you want to play
+measures = [
+    [60, 62, 64, 65, 67],  # Measure 1: C, D, E, F, G
+    [67, 69, 71, 72, 74],  # Measure 2: G, A, B, C, D
+    [74, 72, 71, 69, 67],  # Measure 3: D, C, B, A, G
+]
+
+# Function to read light sensor and check if sensor is covered
+def is_sensor_covered():
+    ldr_value = ldr_pin.read_u16()
+    voltage = (ldr_value / 65535) * 3.3
+    print("LDR value:", ldr_value, "Voltage:", voltage)
+    
+    return voltage < COVERED_THRESHOLD
+
+# Function to send MIDI Note On command
+async def send_midi_note_on(note):
+    try:
+        timestamp_ms = time.ticks_ms()
+        tsM = (timestamp_ms >> 7 & 0b111111) | 0x80
+        tsL = 0x80 | (timestamp_ms & 0b1111111)
+        payload = bytes([tsM, tsL, cmd | channel, note, velocity['f']])
+        p.send(payload)
+        print(f"Sent Note ON: {note}")
+    except Exception as e:
+        print(f"Error sending Note ON: {e}")
+
+# Function to send MIDI Note Off command
+async def send_midi_note_off(note):
+    try:
+        timestamp_ms = time.ticks_ms()
+        tsM = (timestamp_ms >> 7 & 0b111111) | 0x80
+        tsL = 0x80 | (timestamp_ms & 0b1111111)
+        payload = bytes([tsM, tsL, NoteOff | channel, note, velocity['off']])
+        p.send(payload)
+        print(f"Sent Note OFF: {note}")
+    except Exception as e:
+        print(f"Error sending Note OFF: {e}")
+
+# Function to play defined measures with sensor-controlled pausing
+async def play_measures_with_pause():
+    while True:  # Continue indefinitely
+        for measure in measures:
+            for note in measure:
+                if not is_sensor_covered():  # Sensor is uncovered
+                    await send_midi_note_on(note)
+                    await asyncio.sleep(1)  # Duration for note being played
+                    await send_midi_note_off(note)
+                    await asyncio.sleep(0.1)  # Small delay for processing
+                else:
+                    print("Sensor is covered, sending silent Note ON.")
+                    await send_midi_note_on(0)  # Send a no noise note
+                    await asyncio.sleep(1)  # Longer delay when covered
+
+async def main():
+    try:
+        print("Starting MIDI note playback with sensor control.")
+        await play_measures_with_pause()
+    finally:
+        # Do not disconnect; keep the BLE connection alive
+        print("MIDI playback running indefinitely. Press Ctrl+C to stop.")
+
+# Run the main function using asyncio
+asyncio.run(main())
