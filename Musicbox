@@ -1,6 +1,6 @@
-import time
-import uasyncio as asyncio  # Use uasyncio for MicroPython
-from BLE_CEEO import Yell
+import time.py
+import uasyncio.py as asyncio  # Use uasyncio for MicroPython
+from BLE_CEEO.py import Yell
 from machine import ADC, Pin
 
 # MIDI Commands
